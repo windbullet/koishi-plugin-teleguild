@@ -4,6 +4,8 @@ import {} from 'koishi-plugin-puppeteer'
 
 export const name = 'teleguild'
 
+export const usage = "使用文档/更新日志：https://forum.koishi.xyz/t/topic/10178"
+
 declare module 'koishi' {
   interface Tables {
     teleguild_protals_auto: Portal
@@ -104,7 +106,7 @@ export function apply(ctx: Context, config: Config) {
     callId: "unsigned",
     id: "string",
     name: "string"
-  }, { primary: 'callId', autoInc: true })
+  }, { primary: 'callId' })
 
   let guilds: Guilds = {}
 
@@ -122,27 +124,32 @@ export function apply(ctx: Context, config: Config) {
       }
 
       let initiatorGuildId = session.guildId
+      let gd = session.bot.getGuild(initiatorGuildId) 
       let dbName = config.autoGuilds ? "teleguild_protals_auto" : "teleguild_protals_manual"
 
-      let guild = await ctx.database.get(dbName as any, { callId: guildId })
+      let guild = (await ctx.database.get(dbName as any, { callId: guildId }))[0]
 
-      if (guild.length === 0) {
-        guild = await ctx.database.get(dbName as any, { id: guildId })
-        if (guild.length === 0) {
-          return "群ID不存在或缓存未刷新，请使用“群互通.通讯录”后重试"
+      if (guild === undefined) {
+        guild = (await ctx.database.get(dbName as any, { id: guildId }))[0]
+        if (guild === undefined) {
+          try {
+            guild = await session.bot.getGuild(String(guildId))
+          } catch {
+            return "群ID不存在或缓存未刷新，请尝试使用“群互通.通讯录”后重试"
+          }
         }
       }
 
-      let targetGuildId = guild[0].id
+      let targetGuildId = guild.id
 
       if (guilds[initiatorGuildId]) return "你所在的群正在通话中"
-      if (guild[0].id === initiatorGuildId) return "不能给自己打电话"
+      if (guild.id === initiatorGuildId) return "不能给自己打电话"
       if (guilds[targetGuildId]) return "对方群正在通话中，请稍后再试"
 
       guilds[targetGuildId] = initiatorGuildId
       guilds[initiatorGuildId] = targetGuildId
 
-      await session.bot.sendMessage(targetGuildId, `群聊“${session.event.guild.name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
+      await session.bot.sendMessage(targetGuildId, `群聊“${(await gd).name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
       session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已发起群消息互通请求`)
 
       let disposeYesOrNo = ctx.guild(targetGuildId).on('message', async (session) => {
@@ -196,14 +203,15 @@ export function apply(ctx: Context, config: Config) {
 
         let relayMessage: (session: Session<never, never, Context>, guildId: string) => Promise<void>
 
-        if (config.limit === "限制时间") {
-          timeLimit()
-        } else if (config.limit === "限制消息量") {
+        if (config.limit === "限制消息量") {
           messageLimit()
         } else if (config.limit === "限制时间或消息量（其中之一达到就结束）") {
           timeLimit()
           messageLimit()
         } else {
+          if (config.limit === "限制时间") {
+            timeLimit()
+          }
           relayMessage = async (session: Session<never, never, Context>, guildId: string) => {
             let content = ""
             let date = new Date()
@@ -266,7 +274,7 @@ export function apply(ctx: Context, config: Config) {
           disposeTip()
           if (disposeMaxTime !== undefined) disposeMaxTime()
           session.bot.sendMessage(id, `通话已挂断`)
-          session.bot.sendMessage(guilds[id], `${h.quote(session.messageId)}对方已挂断`)
+          session.bot.sendMessage(guilds[id], `对方已挂断`)
           delete guilds[targetGuildId]
           delete guilds[initiatorGuildId]
         }
@@ -293,7 +301,16 @@ export function apply(ctx: Context, config: Config) {
         await ctx.database.upsert("teleguild_protals_auto", guilds, ["id", "name"])
       } else {
         dbName = "teleguild_protals_manual"
-        await ctx.database.upsert("teleguild_protals_manual", config.activeGuilds, ["id", "name"])
+        await ctx.database.remove("teleguild_protals_manual", {})
+        let activeGuilds = []
+        for (let index = 1; index <= config.activeGuilds.length; index++) {
+          activeGuilds.push({
+            callId: index,
+            id: config.activeGuilds[index - 1].id,
+            name: config.activeGuilds[index - 1].name
+          })
+        }
+        await ctx.database.upsert("teleguild_protals_manual", activeGuilds, ["id", "name"])
       }
 
       let rows = []
