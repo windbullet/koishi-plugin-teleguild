@@ -110,7 +110,7 @@ export function apply(ctx: Context, config: Config) {
 
   let guilds: Guilds = {}
 
-  let messages: Messages = {}
+
 
   ctx.command("群互通", "群消息互通")
 
@@ -150,7 +150,7 @@ export function apply(ctx: Context, config: Config) {
       guilds[initiatorGuildId] = targetGuildId
 
       await session.bot.sendMessage(targetGuildId, `群聊“${(await gd).name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
-      session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已发起群消息互通请求`)
+      session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已向群聊“${guild.name}”发起群消息互通请求`)
 
       let disposeYesOrNo = ctx.guild(targetGuildId).on('message', async (session) => {
         if (session.content === "挂断") {
@@ -171,6 +171,8 @@ export function apply(ctx: Context, config: Config) {
       }, 30000)
 
       function answer() {
+        let messages: Messages = {}
+
         disposeYesOrNo()
         let msg = `通话已接通，任何群员都可以发送“挂断”结束通话`
         if (config.limit === "限制时间") {
@@ -183,7 +185,7 @@ export function apply(ctx: Context, config: Config) {
         session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}${msg}`)
         session.bot.sendMessage(targetGuildId, msg)
 
-        let disposeGuild1 = ctx.guild(targetGuildId).on('message', async (session) => {
+        let disposeGuild1 = ctx.self(session.selfId).guild(targetGuildId).on('message', async (session) => {
           if (session.content === "挂断") {
             hangUpWithMessage(targetGuildId)
           } else {
@@ -191,7 +193,7 @@ export function apply(ctx: Context, config: Config) {
           }
         })
 
-        let disposeGuild2 = ctx.guild(initiatorGuildId).on('message', async (session) => {
+        let disposeGuild2 = ctx.self(session.selfId).guild(initiatorGuildId).on('message', async (session) => {
           if (session.content === "挂断") {
             hangUpWithMessage(initiatorGuildId)
           } else {
