@@ -116,8 +116,6 @@ export function apply(ctx: Context, config: Config) {
 
   let guilds: Guilds = {}
 
-
-
   ctx.command("群互通", "群消息互通")
 
   ctx.command("群互通.发起 <guildId:posint>", "向指定群发起群消息互通，ID可在“群互通.通讯录”中查看")
@@ -155,8 +153,15 @@ export function apply(ctx: Context, config: Config) {
       guilds[targetGuildId] = initiatorGuildId
       guilds[initiatorGuildId] = targetGuildId
 
-      await session.bot.sendMessage(targetGuildId, `群聊“${(await gd).name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
-      session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已向群聊“${guild.name}”发起群消息互通请求`)
+      try {
+        await session.bot.sendMessage(targetGuildId, `群聊“${(await gd).name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
+        session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已向群聊“${guild.name}”发起群消息互通请求`)
+      } catch (e) {
+        delete guilds[targetGuildId]
+        delete guilds[initiatorGuildId]
+        ctx.logger("teleguild").warn(e)
+        return "发起请求时遇到错误，请查看日志"
+      }
 
       let disposeYesOrNo = ctx.guild(targetGuildId).on('message', async (session) => {
         if (session.content === "挂断") {
