@@ -1,5 +1,4 @@
-import { time } from 'console'
-import { Context, Schema, Session, Tables, h } from 'koishi'
+import { Context, Schema, Session, h } from 'koishi'
 import {} from 'koishi-plugin-puppeteer'
 
 export const name = 'teleguild'
@@ -34,6 +33,8 @@ interface activeGuilds {
 
 export interface Config {
   showGuildId: boolean
+  badWords: string[]
+  allowPicture: boolean
   limit: '不限制' | '限制时间' | '限制消息量' | '限制时间或消息量（其中之一达到就结束）'
   timeLimit?: number
   countLimit?: number
@@ -46,6 +47,11 @@ export const Config: Schema<Config> = Schema.intersect([
     showGuildId: Schema.boolean()
       .default(false)
       .description('是否在通讯录和来电提示中显示群号'),
+    badWords: Schema.array(Schema.string())
+      .description('消息中的这些词语转发时会被替换为*'),
+    allowPicture: Schema.boolean()
+      .default(true)
+      .description('消息是否允许包含图片/语音/视频')
   }),
   Schema.intersect([
     Schema.object({
@@ -215,6 +221,11 @@ export function apply(ctx: Context, config: Config) {
             timeLimit()
           }
           relayMessage = async (session: Session<never, never, Context>, guildId: string) => {
+            if (!config.allowPicture && (session.content.includes("<audio") || session.content.includes("<video") || session.content.includes("<img"))) {
+              session.send(h.quote(session.messageId) + "消息中不可包含图片/语音/视频")
+              return
+            }
+
             let content = ""
             let date = new Date()
             if (messages[session?.quote?.id] !== undefined) {
@@ -222,6 +233,11 @@ export function apply(ctx: Context, config: Config) {
             }
             content += `[${session.username} ${("00" + date.getHours()).slice(-2)}:${("00" + date.getMinutes()).slice(-2)}:${("00" + date.getSeconds()).slice(-2)}]<br/>`
             content += session.content
+
+            config.badWords.forEach((badWord) => {
+              content = content.replaceAll(badWord, "*".repeat(badWord.length))
+            })
+
             messages[(await session.bot.sendMessage(guildId, content))[0]] = session.messageId
           }
         }
@@ -246,6 +262,11 @@ export function apply(ctx: Context, config: Config) {
         function messageLimit() {
           let messageCount = 0
           relayMessage = async (session: Session<never, never, Context>, guildId: string) => {
+            if (!config.allowPicture && (session.content.includes("<audio") || session.content.includes("<video") || session.content.includes("<img"))) {
+              session.send(h.quote(session.messageId) + "消息中不可包含图片/语音/视频")
+              return
+            }
+
             let content = ""
             let date = new Date()
             if (messages[session?.quote?.id] !== undefined) {
@@ -253,6 +274,11 @@ export function apply(ctx: Context, config: Config) {
             }
             content += `[${session.username} ${("00" + date.getHours()).slice(-2)}:${("00" + date.getMinutes()).slice(-2)}:${("00" + date.getSeconds()).slice(-2)}]<br/>`
             content += session.content
+
+            config.badWords.forEach((badWord) => {
+              content = content.replaceAll(badWord, "*".repeat(badWord.length))
+            })
+
             messageCount++
             if (messageCount >= config.countLimit) {
               disposeGuild1()
@@ -356,5 +382,10 @@ export function apply(ctx: Context, config: Config) {
             </table>
           </body>
         </html>`)
+    })
+
+  ctx.command("测试测试")
+    .action(({session}) => {
+      console.log(session.content)
     })
 }
