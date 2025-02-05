@@ -196,21 +196,27 @@ export function apply(ctx: Context, config: Config) {
         session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}${msg}`)
         session.bot.sendMessage(targetGuildId, msg)
 
-        let disposeGuild1 = ctx.self(session.selfId).guild(targetGuildId).on('message', async (session) => {
-          if (session.content === "挂断") {
-            hangUpWithMessage(targetGuildId)
-          } else {
-            await relayMessage(session, initiatorGuildId)
-          }
-        })
+        let disposeGuild1 = ctx.self(session.selfId)
+          .guild(targetGuildId)
+          .exclude(session => session.userId === session.selfId)
+          .on('message', async (session) => {
+            if (session.content === "挂断") {
+              hangUpWithMessage(targetGuildId)
+            } else {
+              await relayMessage(session, initiatorGuildId)
+            }
+          })
 
-        let disposeGuild2 = ctx.self(session.selfId).guild(initiatorGuildId).on('message', async (session) => {
-          if (session.content === "挂断") {
-            hangUpWithMessage(initiatorGuildId)
-          } else {
-            await relayMessage(session, targetGuildId)
-          }
-        })
+        let disposeGuild2 = ctx.self(session.selfId)
+          .guild(initiatorGuildId)
+          .exclude(session => session.userId === session.selfId)
+          .on('message', async (session) => {
+            if (session.content === "挂断") {
+              hangUpWithMessage(initiatorGuildId)
+            } else {
+              await relayMessage(session, targetGuildId)
+            }
+          })
 
         let disposeMaxTime: () => void
 
