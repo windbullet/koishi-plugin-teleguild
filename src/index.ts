@@ -35,6 +35,7 @@ export interface Config {
   showGuildId: boolean
   badWords: string[]
   allowPicture: boolean
+  tips: number
   limit: '不限制' | '限制时间' | '限制消息量' | '限制时间或消息量（其中之一达到就结束）'
   timeLimit?: number
   countLimit?: number
@@ -51,7 +52,11 @@ export const Config: Schema<Config> = Schema.intersect([
       .description('消息中的这些词语转发时会被替换为*'),
     allowPicture: Schema.boolean()
       .default(true)
-      .description('消息是否允许包含图片/语音/视频')
+      .description('消息是否允许包含图片/语音/视频'),
+    tips: Schema.number()
+      .default(120)
+      .description('发送“任何群友都可以发送“挂断”结束当前通话哦”的间隔(s)，0则不发送'),
+      
   }),
   Schema.intersect([
     Schema.object({
@@ -253,16 +258,20 @@ export function apply(ctx: Context, config: Config) {
           }
         }
 
-        let disposeTip = ctx.setInterval(() => {
-          session.bot.sendMessage(initiatorGuildId, `任何群友都可以发送“挂断”结束当前通话哦`)
-          session.bot.sendMessage(targetGuildId, `任何群友都可以发送“挂断”结束当前通话哦`)
-        }, 120000)
+        let disposeTip: () => void
+
+        if (config.tips !== 0) {
+          disposeTip = ctx.setInterval(() => {
+            session.bot.sendMessage(initiatorGuildId, `任何群友都可以发送“挂断”结束当前通话哦`)
+            session.bot.sendMessage(targetGuildId, `任何群友都可以发送“挂断”结束当前通话哦`)
+          }, config.tips * 1000)
+        }
 
         function timeLimit() {
           disposeMaxTime = ctx.setTimeout(() => {
             disposeGuild1()
             disposeGuild2()
-            disposeTip()
+            if (config.tips !== 0) disposeTip()
             delete guilds[targetGuildId]
             delete guilds[initiatorGuildId]
             session.bot.sendMessage(initiatorGuildId, `时间到达上限，已挂断通话`)
@@ -294,7 +303,7 @@ export function apply(ctx: Context, config: Config) {
             if (messageCount >= config.countLimit) {
               disposeGuild1()
               disposeGuild2()
-              disposeTip()
+              if (config.tips !== 0) disposeTip()
               if (disposeMaxTime !== undefined) disposeMaxTime()
               delete guilds[targetGuildId]
               delete guilds[initiatorGuildId]
@@ -310,7 +319,7 @@ export function apply(ctx: Context, config: Config) {
         async function hangUpWithMessage(id: string) {
           disposeGuild1()
           disposeGuild2()
-          disposeTip()
+          if (config.tips !== 0) disposeTip()
           if (disposeMaxTime !== undefined) disposeMaxTime()
           session.bot.sendMessage(id, `通话已挂断`)
           session.bot.sendMessage(guilds[id], `对方已挂断`)
@@ -393,10 +402,5 @@ export function apply(ctx: Context, config: Config) {
             </table>
           </body>
         </html>`)
-    })
-
-  ctx.command("测试测试")
-    .action(({session}) => {
-      console.log(session.content)
     })
 }
