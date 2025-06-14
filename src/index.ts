@@ -1,4 +1,4 @@
-import { Context, Schema, Session, h } from 'koishi'
+import { Bot, Context, Schema, Session, h } from 'koishi'
 import {} from 'koishi-plugin-puppeteer'
 
 export const name = 'teleguild'
@@ -16,6 +16,7 @@ export interface Portal {
   callId: number
   id: string
   name: string
+  platform: string
 }
 
 interface Guilds {
@@ -150,6 +151,9 @@ export function apply(ctx: Context, config: Config) {
       }
 
       let targetGuildId = guild.id
+      
+      let {assignee} = (await ctx.database.get("channel", {guildId: targetGuildId, platform: session.platform}))[0]
+      let targetAssigneeBot = ctx.bots[`${session.platform}:${assignee}`]
 
       if (guilds[initiatorGuildId]) return "你所在的群正在通话中"
       if (guild.id === initiatorGuildId) return "不能给自己打电话"
@@ -159,8 +163,8 @@ export function apply(ctx: Context, config: Config) {
       guilds[initiatorGuildId] = targetGuildId
 
       try {
-        await session.bot.sendMessage(targetGuildId, `群聊“${(await gd).name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
-        session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已向群聊“${guild.name}”发起群消息互通请求`)
+        await targetAssigneeBot.sendMessage(targetGuildId, `群聊“${(await gd).name}”${config.showGuildId ? `(${initiatorGuildId})` : ""}向本群发起了消息互通请求，请在30秒内发送“接通”或“挂断”`)
+        await session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已向群聊“${guild.name}”发起群消息互通请求`)
       } catch (e) {
         delete guilds[targetGuildId]
         delete guilds[initiatorGuildId]
@@ -172,7 +176,7 @@ export function apply(ctx: Context, config: Config) {
         if (session.content === "挂断") {
           disposeTimeout()
           hangUp()
-          await session.bot.sendMessage(targetGuildId, `${h.quote(session.messageId)}已挂断`)
+          await targetAssigneeBot.sendMessage(targetGuildId, `${h.quote(session.messageId)}已挂断`)
           await session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}已被对方挂断`)
         } else if (session.content === "接通") {
           disposeTimeout()
@@ -182,7 +186,7 @@ export function apply(ctx: Context, config: Config) {
 
       let disposeTimeout = ctx.setTimeout(async () => {
         hangUp()
-        await session.bot.sendMessage(targetGuildId, `通话请求回应超时，已自动挂断`)
+        await targetAssigneeBot.sendMessage(targetGuildId, `通话请求回应超时，已自动挂断`)
         await session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}通话请求回应超时，已自动挂断`)
       }, 30000)
 
@@ -199,16 +203,16 @@ export function apply(ctx: Context, config: Config) {
           msg += `，通话消息量上限为${config.countLimit}条，通话时间上限为${config.timeLimit}秒`
         }
         session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}${msg}`)
-        session.bot.sendMessage(targetGuildId, msg)
+        targetAssigneeBot.sendMessage(targetGuildId, msg)
 
         let disposeGuild1 = ctx.self(session.selfId)
           .guild(targetGuildId)
           .exclude(session => session.userId === session.selfId)
           .on('message', async (session) => {
             if (session.content === "挂断") {
-              hangUpWithMessage(targetGuildId)
+              hangUpWithMessage(targetGuildId, session.bot, targetAssigneeBot)
             } else {
-              await relayMessage(session, initiatorGuildId)
+              await relayMessage(session, initiatorGuildId, session.bot)
             }
           })
 
@@ -217,15 +221,15 @@ export function apply(ctx: Context, config: Config) {
           .exclude(session => session.userId === session.selfId)
           .on('message', async (session) => {
             if (session.content === "挂断") {
-              hangUpWithMessage(initiatorGuildId)
+              hangUpWithMessage(initiatorGuildId, targetAssigneeBot, session.bot)
             } else {
-              await relayMessage(session, targetGuildId)
+              await relayMessage(session, targetGuildId, targetAssigneeBot)
             }
           })
 
         let disposeMaxTime: () => void
 
-        let relayMessage: (session: Session<never, never, Context>, guildId: string) => Promise<void>
+        let relayMessage: (session: Session<never, never, Context>, guildId: string, bot: Bot) => Promise<void>
 
         if (config.limit === "限制消息量") {
           messageLimit()
@@ -236,7 +240,7 @@ export function apply(ctx: Context, config: Config) {
           if (config.limit === "限制时间") {
             timeLimit()
           }
-          relayMessage = async (session: Session<never, never, Context>, guildId: string) => {
+          relayMessage = async (session: Session<never, never, Context>, guildId: string, bot: Bot) => {
             if (!config.allowPicture && (session.content.includes("<audio") || session.content.includes("<video") || session.content.includes("<img"))) {
               session.send(h.quote(session.messageId) + "消息中不可包含图片/语音/视频")
               return
@@ -254,7 +258,7 @@ export function apply(ctx: Context, config: Config) {
               content = content.replaceAll(badWord, "*".repeat(badWord.length))
             })
 
-            messages[(await session.bot.sendMessage(guildId, content))[0]] = session.messageId
+            messages[(await bot.sendMessage(guildId, content))[0]] = session.messageId
           }
         }
 
@@ -275,13 +279,13 @@ export function apply(ctx: Context, config: Config) {
             delete guilds[targetGuildId]
             delete guilds[initiatorGuildId]
             session.bot.sendMessage(initiatorGuildId, `时间到达上限，已挂断通话`)
-            session.bot.sendMessage(targetGuildId, `时间到达上限，已挂断通话`)
+            targetAssigneeBot.sendMessage(targetGuildId, `时间到达上限，已挂断通话`)
           }, config.timeLimit * 1000)
         }
 
         function messageLimit() {
           let messageCount = 0
-          relayMessage = async (session: Session<never, never, Context>, guildId: string) => {
+          relayMessage = async (session: Session<never, never, Context>, guildId: string, bot: Bot) => {
             if (!config.allowPicture && (session.content.includes("<audio") || session.content.includes("<video") || session.content.includes("<img"))) {
               session.send(h.quote(session.messageId) + "消息中不可包含图片/语音/视频")
               return
@@ -307,22 +311,22 @@ export function apply(ctx: Context, config: Config) {
               if (disposeMaxTime !== undefined) disposeMaxTime()
               delete guilds[targetGuildId]
               delete guilds[initiatorGuildId]
-              await session.bot.sendMessage(guildId, content)
+              await bot.sendMessage(guildId, content)
               session.bot.sendMessage(initiatorGuildId, `消息量到达上限，已挂断通话`)
-              session.bot.sendMessage(targetGuildId, `消息量到达上限，已挂断通话`)
+              bot.sendMessage(targetGuildId, `消息量到达上限，已挂断通话`)
             } else {
-              messages[(await session.bot.sendMessage(guildId, content))[0]] = session.messageId
+              messages[(await bot.sendMessage(guildId, content))[0]] = session.messageId
             }
           }
         }
 
-        async function hangUpWithMessage(id: string) {
+        async function hangUpWithMessage(id: string, bot: Bot, anotherBot: Bot) {
           disposeGuild1()
           disposeGuild2()
           if (config.tips !== 0) disposeTip()
           if (disposeMaxTime !== undefined) disposeMaxTime()
-          session.bot.sendMessage(id, `通话已挂断`)
-          session.bot.sendMessage(guilds[id], `对方已挂断`)
+          bot.sendMessage(id, `通话已挂断`)
+          anotherBot.sendMessage(guilds[id], `对方已挂断`)
           delete guilds[targetGuildId]
           delete guilds[initiatorGuildId]
         }
@@ -343,8 +347,13 @@ export function apply(ctx: Context, config: Config) {
       if (config.autoGuilds) {
         dbName = "teleguild_protals_auto"
         let guilds = []
-        for await (let guild of session.bot.getGuildIter()) {
-          guilds.push(guild)
+        const sessionPlatformBots = ctx.bots.map(bot => {if (bot.platform === session.platform) return bot})
+        for (const bot of sessionPlatformBots) {
+          for await (const guild of bot.getGuildIter()) {
+            if (!guilds.map(g => g.id).includes(guild.id)) {
+              guilds.push(guild)
+            }
+          }
         }
         await ctx.database.upsert("teleguild_protals_auto", guilds, ["id", "name"])
       } else {
