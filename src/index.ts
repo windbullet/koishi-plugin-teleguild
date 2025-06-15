@@ -216,7 +216,7 @@ export function apply(ctx: Context, config: Config) {
             }
           })
 
-        let disposeGuild2 = ctx.self(session.selfId)
+        let disposeGuild2 = ctx.self(targetAssigneeBot.selfId)
           .guild(initiatorGuildId)
           .exclude(session => session.userId === session.selfId)
           .on('message', async (session) => {
