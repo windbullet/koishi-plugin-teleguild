@@ -205,9 +205,9 @@ export function apply(ctx: Context, config: Config) {
         session.bot.sendMessage(initiatorGuildId, `${h.quote(session.messageId)}${msg}`)
         targetAssigneeBot.sendMessage(targetGuildId, msg)
 
-        let disposeGuild1 = ctx.self(session.selfId)
+        let disposeGuild1 = ctx.self(targetAssigneeBot.selfId)
           .guild(targetGuildId)
-          .exclude(session => session.userId === session.selfId)
+          .exclude(session => session.userId === targetAssigneeBot.selfId)
           .on('message', async (session) => {
             if (session.content === "挂断") {
               hangUpWithMessage(targetGuildId, session.bot, targetAssigneeBot)
@@ -216,7 +216,7 @@ export function apply(ctx: Context, config: Config) {
             }
           })
 
-        let disposeGuild2 = ctx.self(targetAssigneeBot.selfId)
+        let disposeGuild2 = ctx.self(session.selfId)
           .guild(initiatorGuildId)
           .exclude(session => session.userId === session.selfId)
           .on('message', async (session) => {
